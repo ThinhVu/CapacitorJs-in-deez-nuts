@@ -201,10 +201,39 @@ public class MessageHandler {
 
     // entry point to send from native to web browser
     public void sendResponseMessage(PluginCall call, PluginResult successResult, PluginResult errorResult) {
-      ...
-      final String runScript = "window.Capacitor.fromNative(" + data.toString() + ")";
-      final WebView webView = this.webView;
-      webView.post(() -> webView.evaluateJavascript(runScript, null));
+        try {
+            PluginResult data = new PluginResult();
+            data.put("save", call.isKeptAlive());
+            data.put("callbackId", call.getCallbackId());
+            data.put("pluginId", call.getPluginId());
+            data.put("methodName", call.getMethodName());
+
+            boolean pluginResultInError = errorResult != null;
+            if (pluginResultInError) {
+                data.put("success", false);
+                data.put("error", errorResult);
+                Logger.debug("Sending plugin error: " + data.toString());
+            } else {
+                data.put("success", true);
+                if (successResult != null) {
+                    data.put("data", successResult);
+                }
+            }
+
+            boolean isValidCallbackId = !call.getCallbackId().equals(PluginCall.CALLBACK_ID_DANGLING);
+            if (isValidCallbackId) {
+                final String runScript = "window.Capacitor.fromNative(" + data.toString() + ")";
+                final WebView webView = this.webView;
+                webView.post(() -> webView.evaluateJavascript(runScript, null));
+            } else {
+                bridge.getApp().fireRestoredResult(data);
+            }
+        } catch (Exception ex) {
+            Logger.error("sendResponseMessage: error: " + ex);
+        }
+        if (!call.isKeptAlive()) {
+            call.release(bridge);
+        }
     }
 }
 
