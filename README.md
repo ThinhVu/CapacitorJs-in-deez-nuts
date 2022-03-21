@@ -181,12 +181,14 @@ postToNative = data => {
 ### Message transfer
 ```java
 public class MessageHandler {
+    private Bridge bridge;
     private WebView webView;
-    ...
+    private PluginManager cordovaPluginManager;
 
     public MessageHandler(Bridge bridge, WebView webView, PluginManager cordovaPluginManager) {
-	      ...
+        this.bridge = bridge;
         this.webView = webView;
+        this.cordovaPluginManager = cordovaPluginManager;
         webView.addJavascriptInterface(this, "androidBridge");
     }
 
@@ -197,7 +199,63 @@ public class MessageHandler {
      */
     @JavascriptInterface
     @SuppressWarnings("unused")
-    public void postMessage(String jsonStr) { ... }
+    public void postMessage(String jsonStr) {
+        try {
+            JSObject postData = new JSObject(jsonStr);
+
+            String type = postData.getString("type");
+
+            boolean typeIsNotNull = type != null;
+            boolean isCordovaPlugin = typeIsNotNull && type.equals("cordova");
+            boolean isJavaScriptError = typeIsNotNull && type.equals("js.error");
+
+            String callbackId = postData.getString("callbackId");
+
+            if (isCordovaPlugin) {
+                String service = postData.getString("service");
+                String action = postData.getString("action");
+                String actionArgs = postData.getString("actionArgs");
+
+                Logger.verbose(
+                    Logger.tags("Plugin"),
+                    "To native (Cordova plugin): callbackId: " +
+                    callbackId +
+                    ", service: " +
+                    service +
+                    ", action: " +
+                    action +
+                    ", actionArgs: " +
+                    actionArgs
+                );
+
+                this.callCordovaPluginMethod(callbackId, service, action, actionArgs);
+            } else if (isJavaScriptError) {
+                Logger.error("JavaScript Error: " + jsonStr);
+            } else {
+                String pluginId = postData.getString("pluginId");
+                String methodName = postData.getString("methodName");
+                JSObject methodData = postData.getJSObject("options", new JSObject());
+
+                Logger.verbose(
+                    Logger.tags("Plugin"),
+                    "To native (Capacitor plugin): callbackId: " + callbackId + ", pluginId: " + pluginId + ", methodName: " + methodName
+                );
+
+                this.callPluginMethod(callbackId, pluginId, methodName, methodData);
+            }
+        } catch (Exception ex) {
+            Logger.error("Post message error:", ex);
+        }
+    }
+    
+    private void callPluginMethod(String callbackId, String pluginId, String methodName, JSObject methodData) {
+        PluginCall call = new PluginCall(this, pluginId, callbackId, methodName, methodData);
+        bridge.callPluginMethod(pluginId, methodName, call);
+    }
+
+    private void callCordovaPluginMethod(String callbackId, String service, String action, String actionArgs) {
+        cordovaPluginManager.exec(service, action, callbackId, actionArgs);
+    }
 
     // entry point to send from native to web browser
     public void sendResponseMessage(PluginCall call, PluginResult successResult, PluginResult errorResult) {
